@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<meta name="referrer" content="no-referrer">
+<meta name="theme-color" content="#0a0a0a">
+<title>Big Foods | Relatórios</title>
+<style>
+  :root{
+    --bg:#0a0a0a; --card:#161616; --card2:#1f1f1f; --line:#2a2a2a;
+    --txt:#f2f2f2; --muted:#9a9a9a; --acc:#ffc72c; --red:#e2412f; --ok:#35c46a;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:var(--txt);
+    font-family:Arial,Helvetica,sans-serif;-webkit-text-size-adjust:100%}
+  .wrap{max-width:900px;margin:0 auto;padding:18px 16px 40px}
+  header.top{display:flex;align-items:center;gap:12px;margin-bottom:6px}
+  .logo{width:44px;height:44px;border-radius:12px;background:var(--acc);color:#111;
+    display:flex;align-items:center;justify-content:center;font-weight:700;font-size:18px}
+  h1{font-size:20px;margin:0}
+  .sub{color:var(--muted);font-size:13px;margin-top:2px}
+  .badge{display:inline-block;margin:12px 0 4px;padding:6px 10px;border-radius:999px;
+    background:#1c2a1f;color:var(--ok);font-size:12px}
+  .badge.warn{background:#2d2410;color:var(--acc)}
+  h2{font-size:13px;letter-spacing:.08em;text-transform:uppercase;color:var(--acc);
+    margin:26px 0 10px}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:10px}
+  button.item{all:unset;cursor:pointer;display:flex;gap:12px;align-items:center;
+    background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px}
+  button.item:hover,button.item:focus-visible{background:var(--card2);border-color:var(--acc)}
+  .ico{flex:0 0 40px;height:40px;border-radius:10px;background:#262626;display:flex;
+    align-items:center;justify-content:center;font-size:20px}
+  .it{font-size:15px;font-weight:700}
+  .id{font-size:12px;color:var(--muted);margin-top:3px}
+  .msg{margin-top:60px;text-align:center;color:var(--muted);line-height:1.5}
+  .msg b{color:var(--txt);font-size:18px;display:block;margin-bottom:8px}
+  footer{margin-top:34px;color:#666;font-size:11px;text-align:center}
+
+  /* visualizador */
+  #viewer{display:none;position:fixed;inset:0;background:#2b2b2b;flex-direction:column}
+  #viewer.on{display:flex}
+  .bar{flex:0 0 auto;display:flex;align-items:center;gap:8px;padding:10px 12px;
+    padding-top:calc(10px + env(safe-area-inset-top));background:#111;border-bottom:1px solid var(--line)}
+  .bar .t{flex:1;min-width:0;font-weight:700;font-size:14px;white-space:nowrap;
+    overflow:hidden;text-overflow:ellipsis}
+  .btn{all:unset;cursor:pointer;background:var(--acc);color:#111;font-weight:700;
+    font-size:14px;padding:9px 14px;border-radius:10px}
+  .btn.sec{background:#2a2a2a;color:var(--txt)}
+  .btn.icon{padding:9px 12px}
+  #pages{flex:1;overflow:auto;-webkit-overflow-scrolling:touch;padding:10px 0}
+  #pages canvas{display:block;margin:0 auto 10px;background:#fff;box-shadow:0 2px 8px #0008}
+  #status{color:#ddd;text-align:center;padding:40px 16px}
+</style>
+</head>
+<body>
+<div class="wrap" id="menu">
+  <header class="top">
+    <div class="logo">BF</div>
+    <div>
+      <h1 id="titulo">Big Foods · Relatórios Diários</h1>
+      <div class="sub" id="pub">Carregando...</div>
+    </div>
+  </header>
+  <div id="validade"></div>
+  <div id="conteudo"></div>
+  <footer>Uso interno. Não encaminhe este link para fora da equipe.</footer>
+</div>
+
+<div id="viewer" aria-live="polite">
+  <div class="bar">
+    <button class="btn" id="voltar">&larr; Voltar</button>
+    <div class="t" id="vtitulo"></div>
+    <button class="btn sec icon" id="menos" title="Diminuir">&minus;</button>
+    <button class="btn sec icon" id="mais" title="Aumentar">+</button>
+    <button class="btn sec" id="baixar">Baixar</button>
+  </div>
+  <div id="pages"><div id="status">Abrindo...</div></div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script>
+(function(){
+  "use strict";
+  var WORKER = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+  var conteudo = document.getElementById("conteudo");
+  var pub = document.getElementById("pub");
+  var validade = document.getElementById("validade");
+  var viewer = document.getElementById("viewer");
+  var pagesEl = document.getElementById("pages");
+  var chave = null, pasta = null, manifesto = null;
+  var atual = {bytes:null, nome:"", zoom:1, doc:null};
+
+  function aviso(titulo, texto){
+    pub.textContent = "";
+    conteudo.innerHTML = '<div class="msg"><b></b><span></span></div>';
+    conteudo.querySelector("b").textContent = titulo;
+    conteudo.querySelector("span").textContent = texto;
+  }
+
+  function lerHash(){
+    var p = {};
+    location.hash.replace(/^#/, "").split("&").forEach(function(kv){
+      var i = kv.indexOf("=");
+      if(i > 0) p[kv.slice(0,i)] = decodeURIComponent(kv.slice(i+1));
+    });
+    return p;
+  }
+
+  function b64url(s){
+    s = s.replace(/-/g,"+").replace(/_/g,"/");
+    while(s.length % 4) s += "=";
+    var bin = atob(s), out = new Uint8Array(bin.length);
+    for(var i=0;i<bin.length;i++) out[i] = bin.charCodeAt(i);
+    return out;
+  }
+
+  async function baixarDecifrar(arquivo){
+    var r = await fetch(pasta + "/" + arquivo + "?v=" + Date.now(), {cache:"no-store"});
+    if(!r.ok) throw new Error("http " + r.status);
+    var buf = new Uint8Array(await r.arrayBuffer());
+    var iv = buf.slice(0,12), dados = buf.slice(12);
+    var claro = await crypto.subtle.decrypt({name:"AES-GCM", iv:iv}, chave, dados);
+    return new Uint8Array(claro);
+  }
+
+  function fmt(iso){
+    var d = new Date(iso);
+    function z(n){return (n<10?"0":"")+n;}
+    return z(d.getDate())+"/"+z(d.getMonth()+1)+" às "+z(d.getHours())+":"+z(d.getMinutes());
+  }
+
+  function montarMenu(){
+    var m = manifesto;
+    if(m.nome){ document.getElementById("titulo").textContent = "Big Foods · " + m.nome; document.title = "Big Foods | " + m.nome; }
+    pub.textContent = "Relatórios diários · publicado em " + fmt(m.publicado_em);
+    var ate = new Date(new Date(m.publicado_em).getTime() + m.validade_horas*3600e3);
+    var horas = (ate - new Date())/3600e3;
+    validade.innerHTML = '<span class="badge'+(horas<3?' warn':'')+'"></span>';
+    validade.firstChild.textContent = "Link válido até " + fmt(ate.toISOString());
+    conteudo.innerHTML = "";
+    if(!m.itens.length){ aviso("Nenhum relatório hoje", "Aguarde a próxima publicação."); return; }
+    var grupos = [];
+    m.itens.forEach(function(it){ if(grupos.indexOf(it.grupo) < 0) grupos.push(it.grupo); });
+    grupos.forEach(function(g){
+      var h = document.createElement("h2"); h.textContent = g; conteudo.appendChild(h);
+      var grid = document.createElement("div"); grid.className = "grid";
+      m.itens.filter(function(it){return it.grupo===g;}).forEach(function(it){
+        var b = document.createElement("button"); b.className = "item";
+        b.innerHTML = '<div class="ico"></div><div><div class="it"></div><div class="id"></div></div>';
+        b.querySelector(".ico").textContent = it.icone || "📄";
+        b.querySelector(".it").textContent = it.titulo;
+        b.querySelector(".id").textContent = it.detalhe;
+        b.addEventListener("click", function(){ abrir(it, true); });
+        grid.appendChild(b);
+      });
+      conteudo.appendChild(grid);
+    });
+  }
+
+  async function renderizar(){
+    var doc = atual.doc; if(!doc) return;
+    pagesEl.innerHTML = "";
+    var largura = Math.min(pagesEl.clientWidth - 16, 1100);
+    var dpr = Math.min(window.devicePixelRatio || 1, 2.5);
+    for(var n=1; n<=doc.numPages; n++){
+      var pg = await doc.getPage(n);
+      var base = pg.getViewport({scale:1});
+      var escala = (largura / base.width) * atual.zoom;
+      var vp = pg.getViewport({scale: escala * dpr});
+      var c = document.createElement("canvas");
+      c.width = Math.floor(vp.width); c.height = Math.floor(vp.height);
+      c.style.width = Math.floor(vp.width/dpr) + "px";
+      c.style.height = Math.floor(vp.height/dpr) + "px";
+      pagesEl.appendChild(c);
+      await pg.render({canvasContext:c.getContext("2d"), viewport:vp}).promise;
+    }
+  }
+
+  async function abrir(it, empilhar){
+    if(empilhar) history.pushState({doc:it.arquivo}, "", location.href);
+    document.getElementById("vtitulo").textContent = it.titulo;
+    viewer.classList.add("on"); document.body.style.overflow = "hidden";
+    pagesEl.innerHTML = '<div id="status">Abrindo...</div>';
+    try{
+      var bytes = await baixarDecifrar(it.arquivo);
+      atual.bytes = bytes; atual.nome = it.nome_download; atual.zoom = 1;
+      atual.doc = await pdfjsLib.getDocument({data: bytes.slice()}).promise;
+      await renderizar();
+    }catch(e){
+      pagesEl.innerHTML = '<div id="status">Não foi possível abrir este relatório. O link pode ter expirado.</div>';
+    }
+  }
+
+  function fechar(){
+    viewer.classList.remove("on"); document.body.style.overflow = "";
+    pagesEl.innerHTML = ""; atual.doc = null;
+  }
+
+  document.getElementById("voltar").addEventListener("click", function(){
+    if(history.state && history.state.doc) history.back(); else fechar();
+  });
+  window.addEventListener("popstate", function(){ fechar(); });
+  document.getElementById("mais").addEventListener("click", function(){ atual.zoom = Math.min(atual.zoom*1.25, 4); renderizar(); });
+  document.getElementById("menos").addEventListener("click", function(){ atual.zoom = Math.max(atual.zoom/1.25, 0.5); renderizar(); });
+  document.getElementById("baixar").addEventListener("click", function(){
+    if(!atual.bytes) return;
+    var url = URL.createObjectURL(new Blob([atual.bytes], {type:"application/pdf"}));
+    var a = document.createElement("a"); a.href = url; a.download = atual.nome || "relatorio.pdf";
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(function(){ URL.revokeObjectURL(url); }, 30000);
+  });
+  var tmr; window.addEventListener("resize", function(){ clearTimeout(tmr); tmr = setTimeout(renderizar, 250); });
+
+  async function iniciar(){
+    var p = lerHash();
+    if(!p.d || !p.k){ aviso("Portal de Relatórios Big Foods", "Abra pelo link do dia enviado no grupo."); return; }
+    if(!window.crypto || !crypto.subtle){ aviso("Navegador sem suporte", "Atualize o navegador do celular e tente de novo."); return; }
+    if(!/^[A-Za-z0-9_-]{10,64}$/.test(p.d)){ aviso("Link inválido", "Confira se o link foi copiado inteiro."); return; }
+    pasta = p.d;
+    try{
+      chave = await crypto.subtle.importKey("raw", b64url(p.k), {name:"AES-GCM"}, false, ["decrypt"]);
+      var txt = new TextDecoder().decode(await baixarDecifrar("manifesto.bin"));
+      manifesto = JSON.parse(txt);
+    }catch(e){
+      aviso("Link expirado", "Este link não está mais disponível. Use o link mais recente enviado no grupo.");
+      return;
+    }
+    var fim = new Date(manifesto.publicado_em).getTime() + manifesto.validade_horas*3600e3;
+    if(Date.now() > fim){
+      aviso("Link expirado", "Este link valia por " + manifesto.validade_horas + " horas. Use o link mais recente enviado no grupo.");
+      return;
+    }
+    if(window.pdfjsLib) pdfjsLib.GlobalWorkerOptions.workerSrc = WORKER;
+    montarMenu();
+  }
+  iniciar();
+})();
+</script>
+</body>
+</html>
